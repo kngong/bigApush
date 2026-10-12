@@ -15,7 +15,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+      - name: Configure pip mirror
+        run: |
+          pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+          pip config set global.trusted-host mirrors.aliyun.com
       - run: pip install requests
+        timeout-minutes: 5
       - name: Push morning news
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}

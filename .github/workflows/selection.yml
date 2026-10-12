@@ -2,40 +2,96 @@ name: 收盘选股
 
 on:
   schedule:
+    # 北京时间 15:10（UTC 07:10），周一至周五
     - cron: '10 7 * * 1-5'
   workflow_dispatch:
+
+concurrency:
+  # 同一时间只允许一个选股任务运行，避免并发写数据库冲突
+  group: stock-selection
+  cancel-in-progress: false
 
 jobs:
   run-selection:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # init 约 10 分钟 + 选股约 6 分钟，留足余量
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      - run: pip install -r requirements.txt
+
+      - name: Configure pip mirror
+        run: |
+          pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+          pip config set global.trusted-host mirrors.aliyun.com
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        timeout-minutes: 20
+
       - name: Restore database cache
         uses: actions/cache@v4
         with:
-          path: data
-          key: stock-db-${{ github.run_id }}
-          restore-keys: stock-db-
+          path: |
+            data
+            !data/running
+          # 原key 使用 github.run_id（每次运行都唯一），导致缓存永不命中、
+          # 也无法保存，每个交易日都要重新 init（约 10 分钟）。
+          # 改为按仓库+运行号保存，并用 restore-keys 回退到最近一次可用缓存。
+          key: stock-db-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: |
+            stock-db-${{ github.repository }}-
+            stock-db-
+
       - name: Check database
         id: check-db
         run: |
-          if [ -f "data/stock_selection.db" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
+          if [ ! -f "data/stock_selection.db" ]; then
             echo "exists=false" >> $GITHUB_OUTPUT
+            echo "数据库不存在，将执行初始化"
+          else
+            SIZE=$(stat -c%s "data/stock_selection.db" 2>/dev/null || echo 0)
+            echo "数据库大小: $SIZE 字节"
+            # 小于 1MB 视为损坏/未完成，重新初始化
+            if [ "$SIZE" -lt 1000000 ]; then
+              echo "exists=false" >> $GITHUB_OUTPUT
+              echo "数据库过小，判定为无效，将重新初始化"
+            else
+              echo "exists=true" >> $GITHUB_OUTPUT
+            fi
           fi
-      - name: Initialize data (first run)
+
+      - name: Initialize data (first run only)
         if: steps.check-db.outputs.exists == 'false'
-        run: python main.py init
-        timeout-minutes: 45
+        run: |
+          echo "首次运行：初始化数据库，约需 10-15 分钟..."
+          python main.py init
+        timeout-minutes: 60
+
+      - name: Save database cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data
+            !data/running
+          key: stock-db-${{ github.repository }}-${{ github.run_id }}
+
       - name: Run selection and push
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: python main.py run
-        timeout-minutes: 30
+        timeout-minutes: 40
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
+          if-no-files-found: ignore
