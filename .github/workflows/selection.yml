@@ -24,14 +24,12 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Configure pip mirror
-        run: |
-          pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
-          pip config set global.trusted-host mirrors.aliyun.com
-
       - name: Install dependencies
+        # 注意：不要换成阿里云镜像。GitHub runner 在海外，阿里云 PyPI 会慢到
+        # 远超 20 分钟（2026-10-13 实测 pip install 被 timeout 杀掉导致整个
+        # 选股任务失败）。保持默认 PyPI + setup-python 的 pip 缓存即可。
         run: pip install -r requirements.txt
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       - name: Restore database cache
         uses: actions/cache@v4
