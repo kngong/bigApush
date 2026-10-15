@@ -299,8 +299,27 @@ class AKShareFetcher:
             stock_codes=stock_codes
         )
     
+    # ==================== 收盘快照增量 ====================
+
+    def update_daily_snapshot(self, target_date: Optional[str] = None) -> dict:
+        """收盘后用实时快照补当日K线（替代已经失效的 TickFlow 增量）。
+
+        2026-10-15 实测：TickFlow 批量接口返回的最新日期停留在 2026-09-14，
+        导致 KlineUpdater 的"数据源尚未就绪"分支把每日更新整体跳过，
+        云端选股因此长期用同一份陈旧数据重复选股。
+        新浪快照在收盘后即为当日最终行情，全市场 5000+ 只约 3 秒取完。
+
+        参数：
+            target_date: 指定日期 YYYY-MM-DD；为空则自动取快照里的最新交易日
+
+        返回：
+            {'success', 'date', 'written', 'backfilled', 'message'}
+        """
+        from utils.snapshot_updater import SnapshotUpdater
+        return SnapshotUpdater(self.db_manager).update_latest(target_date=target_date)
+
     # ==================== 采集器管理 ====================
-    
+
     def _init_collectors(self) -> None:
         """初始化所有采集器"""
         self.collector_manager._init_collectors()

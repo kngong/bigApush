@@ -98,17 +98,23 @@ class QuantSystem:
         print("\n✓ 数据初始化完成")
 
     def _smart_update(self, max_stocks=None, check_latest=True):
-        """智能更新：3点前不更新，检查每只股票是否有当天数据"""
-        from datetime import datetime
-        import pandas as pd
+        """智能更新：按北京时间判断是否已收盘；收盘后用新浪快照补最近交易日K线。
 
-        today = datetime.now().date()
-        current_time = datetime.now().time()
-        market_close_time = datetime.strptime("15:00", "%H:%M").time()
+        注意：GitHub Actions 的 runner 时区是 UTC。原实现直接用 datetime.now()
+        比较 15:00，导致北京时间 15:10（UTC 07:10）被误判为"尚未收盘"，
+        云端每日更新永远被跳过；而 TickFlow 增量接口本身又长期不更新数据。
+        因此这里改为：北京时间判定 + 新浪快照增量（见 utils/snapshot_updater.py）。
+        """
+        import pandas as pd
+        from utils.snapshot_updater import beijing_now
+
+        now_bj = beijing_now()
+        today = now_bj.date()
+        market_close_time = dt_time(15, 0)
 
         # 3点前：不更新，使用旧数据
-        if current_time < market_close_time:
-            print("\n⏰ 当前时间尚未收盘 (15:00)")
+        if now_bj.time() < market_close_time:
+            print("\n⏰ 当前北京时间尚未收盘 (15:00)")
             print("  使用本地已有数据，跳过网络更新")
             return
 
@@ -143,9 +149,10 @@ class QuantSystem:
             else:
                 print(f"  已检查 {check_limit} 只，{has_today} 只有今天数据，{no_today} 只需要更新")
 
-        # 执行更新
-        print("\n🔄 执行数据更新...")
-        self.fetcher.init_full_data(max_stocks=max_stocks, incremental=True)
+        # 执行更新（新浪收盘快照，全市场约 3 秒）
+        print("\n🔄 执行数据更新（新浪收盘快照）...")
+        result = self.fetcher.update_daily_snapshot()
+        print(f"  {result.get('message', '')}")
         print("\n✓ 数据更新完成")
 
     def update_data(self, max_stocks=None):
@@ -705,10 +712,10 @@ B1完美图形匹配:
         quant.init_data(max_stocks=args.max_stocks)
     
     elif args.command == 'run':
-            # 检查今天是否为交易日
+            # 检查今天是否为交易日（按北京时间，runner 时区是 UTC）
             from utils.trade_date_utils import is_trading_day
-            from datetime import datetime
-            today_str = datetime.now().strftime('%Y-%m-%d')
+            from utils.snapshot_updater import beijing_now
+            today_str = beijing_now().strftime('%Y-%m-%d')
             if not is_trading_day(today_str):
                 print(f"今天 {today_str} 不是交易日，跳过选股")
                 sys.exit(0)
@@ -750,7 +757,7 @@ B1完美图形匹配:
                 except Exception:
                     pass
 
-                lines = [f"📊 缅A每日推送 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})", ""]
+                lines = [f"📊 缅A每日推送 ({beijing_now().strftime('%Y-%m-%d %H:%M:%S')})", ""]
                 total = 0
                 all_stocks = []
                 if isinstance(result, dict):
@@ -777,7 +784,7 @@ B1完美图形匹配:
                         from datetime import date as _date
                         _srm = SelectionRecordManager()
                         _today_codes = {s['code'] for s in all_stocks}
-                        _today_str = datetime.now().strftime('%Y-%m-%d')
+                        _today_str = beijing_now().strftime('%Y-%m-%d')
 
                         _prev_result = _srm.get_selection_history(
                             filters={'end_date': _today_str}, page=1, limit=5000
@@ -861,7 +868,7 @@ B1完美图形匹配:
                             pass
                     if _idx_lines:
                         lines.append("━━━━━━━━━━━━━━━━━━━━")
-                        lines.append(f"📈 今日大盘复盘 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+                        lines.append(f"📈 今日大盘复盘 ({beijing_now().strftime('%Y-%m-%d %H:%M:%S')})")
                         lines.append("")
                         lines.extend(_idx_lines)
                         lines.append("")

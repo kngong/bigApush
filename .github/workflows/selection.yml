@@ -70,15 +70,6 @@ jobs:
           python main.py init
         timeout-minutes: 60
 
-      - name: Save database cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            data
-            !data/running
-          key: stock-db-${{ github.repository }}-${{ github.run_id }}
-
       - name: Run selection and push
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
