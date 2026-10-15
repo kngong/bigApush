@@ -911,7 +911,17 @@ B1完美图形匹配:
                     print(f"  ⚠️ 获取大盘数据失败: {_idx_err}")
 
                 lines.insert(1, f"共 {total} 只股票入选")
-                notifier.send_text("\n".join(lines))
+                print(f"\n正在推送飞书…（共 {total} 只，{len(lines)} 行）")
+                if notifier.send_text("\n".join(lines)):
+                    print(f"✅ 飞书推送成功（共 {total} 只）")
+                else:
+                    # 主动报错：以前推送失败时进程仍以 0 退出，
+                    # Actions 显示"成功"，结果就是"没收到推送却查不出问题"。
+                    print("❌ 飞书推送失败，请检查 webhook / 机器人状态")
+                    sys.exit(1)
+            else:
+                print("\n❌ 选股结果为空，未推送")
+                sys.exit(1)
     
     elif args.command == 'web':
         # 启动Web服务器
